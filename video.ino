@@ -40,8 +40,9 @@
 #define REVISION		3
 #define RC				4
 
-#define	DEBUG			0						// Serial Debug Mode: 1 = enable
-#define SERIALKB		0						// Serial Keyboard: 1 = enable (Experimental)
+#define	DEBUG			1						// Serial Debug Mode: 1 = enable
+#define SERIALKB		1						// Serial Keyboard: 1 = enable (Experimental)
+#define USE_HWFLOW 1
 
 fabgl::PS2Controller		PS2Controller;		// The keyboard class
 fabgl::Canvas *				Canvas;				// The canvas class
@@ -101,13 +102,13 @@ void setup() {
 	disableCore0WDT(); delay(200);								// Disable the watchdog timers
 	disableCore1WDT(); delay(200);
 	#if DEBUG == 1 || SERIALKB == 1
-	DBGSerial.begin(500000, SERIAL_8N1, 3, 1);
+	DBGSerial.begin(115200, SERIAL_8N1, 3, 1);
 	#endif 
 	ESPSerial.end();
  	ESPSerial.setRxBufferSize(UART_RX_SIZE);					// Can't be called when running
  	ESPSerial.begin(UART_BR, SERIAL_8N1, UART_RX, UART_TX);
 	#if USE_HWFLOW == 1
-	ESPSerial.setHwFlowCtrlMode(HW_FLOWCTRL_RTS, 64);			// Can be called whenever
+	ESPSerial.setHwFlowCtrlMode(HW_FLOWCTRL_CTS_RTS, 64);			// Can be called whenever
 	ESPSerial.setPins(UART_NA, UART_NA, UART_CTS, UART_RTS);	// Must be called after begin
 	#else 
 	pinMode(UART_RTS, OUTPUT);
@@ -747,8 +748,56 @@ void do_keyboard() {
 
 	#if SERIALKB == 1
 	if(DBGSerial.available()) {
+    byte ch = DBGSerial.read();
+    if (ch=='+') 
+    {
+        int amount = 65536;
+        debug_log ("Sending %d bytes (R=receive, E=error): \r\n",amount);
+        long int t1 = millis();
+        for (int cnt=0;cnt<amount;cnt++)
+            ESPSerial.write ((byte)cnt);
+        long int t2 = millis();
+        debug_log ("This took: %ld milliseconds\r\n",t2-t1);
+        debug_log ("Send speed: %ld bits/sec\r\n",((amount*8*1000) / (t2-t1)));
+    }
+    else if  (ch=='-')
+    {
+        int amount = 0;
+        bool firsttime = true;
+        debug_log ("Receiving byte stream\r\n");
+        ESPSerial.write ('\0');
+        ESPSerial.write ('\0');
+        long int t1 = millis();
+        byte b = 0;
+        while (!ESPSerial.available());
+        while (true)
+        {
+            ch = ESPSerial.read();
+            if (ch==0)
+            {
+                b=0;
+                if (firsttime)
+                    firsttime = false;
+                else
+                    break;
+            }
+            else
+                firsttime = true;
+            if (ch!=b)
+                debug_log ("E");
+            b++;
+            amount++;
+
+        }
+        long int t2 = millis();
+        debug_log ("Received %d bytes\r\n",amount);
+        debug_log ("This took: %ld milliseconds\r\n",t2-t1);
+        debug_log ("Receive speed: %ld bits/sec\r\n",((amount*8*1000) / (t2-t1)));
+    }
+
+
 		byte packet[] = {
-			DBGSerial.read(),
+			ch,
 			0,
 		};
 		send_packet(PACKET_KEYCODE, sizeof packet, packet);
